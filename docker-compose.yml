@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  traffic-generator:
+    build: .
+    container_name: traffic-generator
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+    command: ["python", "traffic_generator.py", "--continuous", "--workers", "3", "--delay-min", "2", "--delay-max", "8"]
+    # Alternative commands you can use:
+    # For a specific number of requests:
+    # command: ["python", "traffic_generator.py", "--requests", "10", "--workers", "5"]
+    # For faster traffic:
+    # command: ["python", "traffic_generator.py", "--continuous", "--workers", "10", "--delay-min", "1", "--delay-max", "3"]
+    # For slower, more realistic traffic:
+    # command: ["python", "traffic_generator.py", "--continuous", "--workers", "2", "--delay-min", "5", "--delay-max", "15"]
