@@ -14,12 +14,18 @@ import argparse
 import sys
 
 # Configure logging
+import os
+
+# Create logs directory if it doesn't exist
+log_dir = os.path.join(os.getcwd(), 'logs')
+os.makedirs(log_dir, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('traffic_generator.log')
+        logging.FileHandler(os.path.join(log_dir, 'traffic_generator.log'))
     ]
 )
 logger = logging.getLogger(__name__)

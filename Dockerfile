@@ -22,6 +22,11 @@ RUN chmod +x traffic_generator.py
 
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash trafficgen
+
+# Create log directory and set permissions
+RUN mkdir -p /app/logs && chown -R trafficgen:trafficgen /app
+
+# Switch to non-root user
 USER trafficgen
 
 # Set environment variables
