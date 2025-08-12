@@ -24,7 +24,9 @@ RUN chmod +x traffic_generator.py
 RUN useradd --create-home --shell /bin/bash trafficgen
 
 # Create log directory and set permissions
-RUN mkdir -p /app/logs && chown -R trafficgen:trafficgen /app
+RUN mkdir -p /app/logs && \
+    chown -R trafficgen:trafficgen /app && \
+    chmod -R 755 /app
 
 # Switch to non-root user
 USER trafficgen

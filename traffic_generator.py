@@ -20,13 +20,21 @@ import os
 log_dir = os.path.join(os.getcwd(), 'logs')
 os.makedirs(log_dir, exist_ok=True)
 
+# Set up handlers
+handlers = [logging.StreamHandler(sys.stdout)]
+
+# Try to add file handler, but don't fail if we can't write to the file
+try:
+    log_file = os.path.join(log_dir, 'traffic_generator.log')
+    handlers.append(logging.FileHandler(log_file))
+except PermissionError:
+    # If we can't write to the file, just log to console
+    pass
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(os.path.join(log_dir, 'traffic_generator.log'))
-    ]
+    handlers=handlers
 )
 logger = logging.getLogger(__name__)
 
