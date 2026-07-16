@@ -14,8 +14,8 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the traffic generator script
-COPY traffic_generator.py .
+# Copy application assets
+COPY traffic_generator.py index.html ./
 
 # Make the script executable
 RUN chmod +x traffic_generator.py
@@ -33,6 +33,11 @@ USER trafficgen
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl --fail --silent http://127.0.0.1:8080/healthz || exit 1
 
 # Default command
 CMD ["python", "traffic_generator.py", "--continuous"]

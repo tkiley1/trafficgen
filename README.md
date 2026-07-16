@@ -2,6 +2,31 @@
 
 A simple Python-based web traffic generator that visits random websites on the internet. This tool is designed to run in Docker and can generate realistic web traffic patterns.
 
+## Web control surface
+
+TrafficGen serves a responsive control UI on port `8080`. The UI shows live request statistics and
+lets an operator add or remove the HTTPS destinations used by the running generator. Changes apply
+to the next request cycle without restarting the process.
+
+```text
+http://localhost:8080
+```
+
+The service also exposes:
+
+- `GET /healthz` - container and platform health check
+- `GET /api/status` - current request statistics
+- `GET /api/sites` - active destination list
+- `PUT /api/sites` - replace the active destination list
+
+Updates are held in process memory and backed up in the browser's local storage. A container
+replacement resets the server-side list to the defaults until the browser-saved draft is activated
+again.
+
+For safety, destinations must use HTTPS on the standard port. The generator blocks private,
+loopback, reserved, and link-local addresses immediately before each request and does not follow
+redirects.
+
 ## Features
 
 - 🚀 **Multi-threaded**: Concurrent requests with configurable worker count

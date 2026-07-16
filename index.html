@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TrafficGen Control</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #f4f0df;
+        --muted: #999b8d;
+        --panel: rgba(19, 21, 18, 0.86);
+        --line: rgba(244, 240, 223, 0.14);
+        --acid: #c8ff3d;
+        --orange: #ff6a2a;
+        --black: #0a0b09;
+        --danger: #ff5f68;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        overflow-x: hidden;
+        background:
+          radial-gradient(circle at 12% 8%, rgba(200, 255, 61, 0.13), transparent 27rem),
+          radial-gradient(circle at 91% 71%, rgba(255, 106, 42, 0.14), transparent 31rem),
+          var(--black);
+        color: var(--ink);
+        font-family: "Trebuchet MS", sans-serif;
+      }
+
+      body::before {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        background-image:
+          linear-gradient(var(--line) 1px, transparent 1px),
+          linear-gradient(90deg, var(--line) 1px, transparent 1px);
+        background-size: 48px 48px;
+        content: "";
+        mask-image: linear-gradient(to bottom, black, transparent 82%);
+        opacity: 0.24;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .shell {
+        width: min(1400px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 28px 0 56px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 24px;
+      }
+
+      .brand,
+      .eyebrow,
+      .status,
+      .stat-label,
+      .site-index,
+      .button,
+      .hint {
+        font-family: "Courier New", monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+      }
+
+      .brand {
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .brand span {
+        color: var(--acid);
+      }
+
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .status-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--acid);
+        box-shadow: 0 0 18px var(--acid);
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+        gap: 48px;
+        align-items: end;
+        padding: 70px 0 48px;
+      }
+
+      .eyebrow {
+        margin: 0 0 20px;
+        color: var(--orange);
+        font-size: 12px;
+      }
+
+      h1 {
+        max-width: 850px;
+        margin: 0;
+        font-family: Georgia, serif;
+        font-size: clamp(4.2rem, 11vw, 9.8rem);
+        font-weight: 400;
+        line-height: 0.76;
+        letter-spacing: -0.075em;
+      }
+
+      h1 em {
+        color: var(--acid);
+        font-weight: 400;
+      }
+
+      .hero-copy {
+        max-width: 440px;
+        margin: 0 0 4px;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.65;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        border: 1px solid var(--line);
+        background: var(--panel);
+        backdrop-filter: blur(18px);
+      }
+
+      .stat {
+        min-height: 118px;
+        padding: 22px;
+        border-right: 1px solid var(--line);
+      }
+
+      .stat:last-child {
+        border-right: 0;
+      }
+
+      .stat-label {
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .stat-value {
+        display: block;
+        margin-top: 20px;
+        font-family: Georgia, serif;
+        font-size: 36px;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 330px;
+        gap: 24px;
+        margin-top: 24px;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        backdrop-filter: blur(18px);
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 24px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .panel-head h2,
+      .aside-title {
+        margin: 0;
+        font-family: Georgia, serif;
+        font-size: 26px;
+        font-weight: 400;
+      }
+
+      .site-count {
+        color: var(--acid);
+        font-family: "Courier New", monospace;
+        font-size: 12px;
+      }
+
+      .site-list {
+        max-height: 540px;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+        list-style: none;
+      }
+
+      .site-row {
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 16px;
+        min-height: 74px;
+        padding: 12px 20px;
+        border-bottom: 1px solid var(--line);
+        animation: rise 400ms both;
+      }
+
+      .site-row:last-child {
+        border-bottom: 0;
+      }
+
+      .site-index {
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .site-domain {
+        overflow: hidden;
+        font-size: 16px;
+        font-weight: 700;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .site-url {
+        margin-top: 5px;
+        overflow: hidden;
+        color: var(--muted);
+        font-family: "Courier New", monospace;
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .remove {
+        width: 34px;
+        height: 34px;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        background: transparent;
+        color: var(--muted);
+        font-size: 18px;
+        transition: 150ms ease;
+      }
+
+      .remove:hover {
+        border-color: var(--danger);
+        color: var(--danger);
+        transform: rotate(8deg);
+      }
+
+      .editor {
+        padding: 24px;
+      }
+
+      .input-wrap {
+        position: relative;
+        margin-top: 30px;
+      }
+
+      .input-wrap label {
+        display: block;
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-family: "Courier New", monospace;
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .url-input {
+        width: 100%;
+        border: 0;
+        border-bottom: 1px solid var(--muted);
+        border-radius: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--ink);
+        padding: 12px 0;
+        font-family: "Courier New", monospace;
+        font-size: 13px;
+      }
+
+      .url-input:focus {
+        border-color: var(--acid);
+      }
+
+      .button {
+        width: 100%;
+        min-height: 48px;
+        border: 1px solid var(--acid);
+        background: transparent;
+        color: var(--acid);
+        font-size: 10px;
+        font-weight: 700;
+        transition: 160ms ease;
+      }
+
+      .button:hover {
+        background: var(--acid);
+        color: var(--black);
+      }
+
+      .button.primary {
+        margin-top: 12px;
+        background: var(--acid);
+        color: var(--black);
+      }
+
+      .button.primary:hover {
+        box-shadow: 0 0 28px rgba(200, 255, 61, 0.25);
+        transform: translateY(-1px);
+      }
+
+      .button:disabled {
+        cursor: not-allowed;
+        opacity: 0.4;
+        transform: none;
+      }
+
+      .hint {
+        margin: 24px 0;
+        color: var(--muted);
+        font-size: 9px;
+        line-height: 1.8;
+      }
+
+      .message {
+        min-height: 42px;
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .message[data-kind="error"] {
+        color: var(--danger);
+      }
+
+      .message[data-kind="success"] {
+        color: var(--acid);
+      }
+
+      .empty {
+        padding: 60px 24px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      @keyframes pulse {
+        50% {
+          opacity: 0.45;
+          transform: scale(0.78);
+        }
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+      }
+
+      @media (max-width: 900px) {
+        .hero,
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          padding-top: 54px;
+        }
+
+        .stats {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .stat:nth-child(2) {
+          border-right: 0;
+        }
+
+        .stat:nth-child(-n + 2) {
+          border-bottom: 1px solid var(--line);
+        }
+      }
+
+      @media (max-width: 560px) {
+        .shell {
+          width: min(100% - 24px, 1400px);
+          padding-top: 18px;
+        }
+
+        .topbar {
+          padding-bottom: 18px;
+        }
+
+        h1 {
+          font-size: clamp(3.7rem, 22vw, 6rem);
+        }
+
+        .hero-copy {
+          font-size: 15px;
+        }
+
+        .stat {
+          min-height: 100px;
+          padding: 16px;
+        }
+
+        .stat-value {
+          font-size: 30px;
+        }
+
+        .panel-head,
+        .editor {
+          padding: 18px;
+        }
+
+        .site-row {
+          grid-template-columns: 30px minmax(0, 1fr) auto;
+          gap: 10px;
+          padding-inline: 14px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">TRAFFIC<span>GEN</span> / CONTROL</div>
+        <div class="status"><span class="status-dot"></span> Generator active</div>
+      </header>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Outbound signal laboratory</p>
+          <h1>Shape the<br /><em>stream.</em></h1>
+        </div>
+        <p class="hero-copy">
+          Curate the HTTPS destinations feeding the live traffic generator. Changes activate on the
+          next request cycle without restarting the container.
+        </p>
+      </section>
+
+      <section class="stats" aria-label="Generator statistics">
+        <div class="stat">
+          <span class="stat-label">Requests</span>
+          <strong class="stat-value" id="totalRequests">--</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Successful</span>
+          <strong class="stat-value" id="successfulRequests">--</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Failed</span>
+          <strong class="stat-value" id="failedRequests">--</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Uptime</span>
+          <strong class="stat-value" id="uptime">--</strong>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Active destinations</h2>
+            <span class="site-count" id="siteCount">0 targets</span>
+          </div>
+          <ol class="site-list" id="siteList"></ol>
+        </div>
+
+        <aside class="panel editor">
+          <h2 class="aside-title">Edit stream</h2>
+          <form id="addForm">
+            <div class="input-wrap">
+              <label for="siteInput">HTTPS destination</label>
+              <input
+                class="url-input"
+                id="siteInput"
+                name="site"
+                placeholder="example.com"
+                autocomplete="url"
+                required
+              />
+            </div>
+            <p class="hint">Public HTTPS endpoints only. Private networks, credentials, and custom ports are blocked.</p>
+            <button class="button" type="submit">Add destination</button>
+          </form>
+          <button class="button primary" id="activateButton" type="button">Activate changes</button>
+          <p class="message" id="message" aria-live="polite"></p>
+        </aside>
+      </section>
+    </main>
+
+    <script>
+      const state = { sites: [], serverSites: [] };
+      const siteList = document.querySelector("#siteList");
+      const siteCount = document.querySelector("#siteCount");
+      const message = document.querySelector("#message");
+      const activateButton = document.querySelector("#activateButton");
+      const siteInput = document.querySelector("#siteInput");
+
+      function setMessage(text, kind = "") {
+        message.textContent = text;
+        message.dataset.kind = kind;
+      }
+
+      function normalizeUrl(value) {
+        const candidate = value.includes("://") ? value : `https://${value}`;
+        const url = new URL(candidate);
+        if (url.protocol !== "https:") throw new Error("Only HTTPS destinations are allowed.");
+        return url.toString().replace(/\/$/, "");
+      }
+
+      function renderSites() {
+        siteList.replaceChildren();
+        siteCount.textContent = `${state.sites.length} ${state.sites.length === 1 ? "target" : "targets"}`;
+        activateButton.disabled = state.sites.length === 0;
+
+        if (state.sites.length === 0) {
+          const empty = document.createElement("li");
+          empty.className = "empty";
+          empty.textContent = "Add at least one destination to activate the stream.";
+          siteList.append(empty);
+          return;
+        }
+
+        state.sites.forEach((site, index) => {
+          const row = document.createElement("li");
+          row.className = "site-row";
+          row.style.animationDelay = `${Math.min(index * 28, 280)}ms`;
+
+          const number = document.createElement("span");
+          number.className = "site-index";
+          number.textContent = String(index + 1).padStart(2, "0");
+
+          const details = document.createElement("div");
+          const domain = document.createElement("div");
+          domain.className = "site-domain";
+          domain.textContent = new URL(site).hostname;
+          const fullUrl = document.createElement("div");
+          fullUrl.className = "site-url";
+          fullUrl.textContent = site;
+          details.append(domain, fullUrl);
+
+          const remove = document.createElement("button");
+          remove.className = "remove";
+          remove.type = "button";
+          remove.textContent = "x";
+          remove.setAttribute("aria-label", `Remove ${site}`);
+          remove.addEventListener("click", () => {
+            state.sites.splice(index, 1);
+            setMessage("Draft changed. Activate to apply.");
+            renderSites();
+          });
+
+          row.append(number, details, remove);
+          siteList.append(row);
+        });
+      }
+
+      function formatUptime(seconds) {
+        if (seconds < 60) return `${seconds}s`;
+        if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+        if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+        return `${Math.floor(seconds / 86400)}d`;
+      }
+
+      async function loadStatus() {
+        try {
+          const response = await fetch("/api/status", { cache: "no-store" });
+          if (!response.ok) throw new Error("Status unavailable");
+          const status = await response.json();
+          document.querySelector("#totalRequests").textContent = status.total_requests;
+          document.querySelector("#successfulRequests").textContent = status.successful_requests;
+          document.querySelector("#failedRequests").textContent = status.failed_requests;
+          document.querySelector("#uptime").textContent = formatUptime(status.uptime_seconds);
+        } catch (_error) {
+          document.querySelector(".status").lastChild.textContent = " Generator unavailable";
+        }
+      }
+
+      async function loadSites() {
+        const response = await fetch("/api/sites", { cache: "no-store" });
+        if (!response.ok) throw new Error("Could not load destinations");
+        const payload = await response.json();
+        state.serverSites = payload.sites;
+        let saved = null;
+        try {
+          const candidate = JSON.parse(localStorage.getItem("trafficgen-sites") || "null");
+          if (Array.isArray(candidate) && candidate.length) {
+            saved = candidate.map(normalizeUrl);
+          }
+        } catch (_error) {
+          localStorage.removeItem("trafficgen-sites");
+        }
+        state.sites = Array.isArray(saved) && saved.length ? saved : [...payload.sites];
+        renderSites();
+        if (saved && JSON.stringify(saved) !== JSON.stringify(payload.sites)) {
+          setMessage("A browser-saved draft is ready to activate.");
+        }
+      }
+
+      document.querySelector("#addForm").addEventListener("submit", (event) => {
+        event.preventDefault();
+        try {
+          const site = normalizeUrl(siteInput.value.trim());
+          if (state.sites.includes(site)) throw new Error("That destination is already listed.");
+          if (state.sites.length >= 100) throw new Error("The destination limit is 100.");
+          state.sites.push(site);
+          siteInput.value = "";
+          setMessage("Draft changed. Activate to apply.");
+          renderSites();
+        } catch (error) {
+          setMessage(error.message || "Enter a valid HTTPS URL.", "error");
+        }
+      });
+
+      activateButton.addEventListener("click", async () => {
+        activateButton.disabled = true;
+        setMessage("Activating destinations...");
+        try {
+          const response = await fetch("/api/sites", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sites: state.sites }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "Activation failed");
+          state.sites = payload.sites;
+          state.serverSites = [...payload.sites];
+          localStorage.setItem("trafficgen-sites", JSON.stringify(payload.sites));
+          setMessage("Stream updated. New targets are active.", "success");
+          renderSites();
+        } catch (error) {
+          setMessage(error.message || "Activation failed.", "error");
+          activateButton.disabled = false;
+        }
+      });
+
+      Promise.all([loadSites(), loadStatus()]).catch((error) => {
+        setMessage(error.message || "Control surface unavailable.", "error");
+      });
+      window.setInterval(loadStatus, 5000);
+    </script>
+  </body>
+</html>

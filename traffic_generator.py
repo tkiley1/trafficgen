@@ -1,45 +1,44 @@
 #!/usr/bin/env python3
-"""
-Simple Web Traffic Generator
-Generates traffic to random websites on the internet.
-"""
+"""Generate web traffic and expose a small control surface for target sites."""
 
-import random
-import time
-import requests
-import logging
-from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor
 import argparse
-import sys
-
-# Configure logging
+import ipaddress
+import json
+import logging
 import os
+import random
+import socket
+import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlparse
 
-# Create logs directory if it doesn't exist
-log_dir = os.path.join(os.getcwd(), 'logs')
-os.makedirs(log_dir, exist_ok=True)
+import requests
 
-# Set up handlers
-handlers = [logging.StreamHandler(sys.stdout)]
 
-# Try to add file handler, but don't fail if we can't write to the file
-try:
-    log_file = os.path.join(log_dir, 'traffic_generator.log')
-    handlers.append(logging.FileHandler(log_file))
-except PermissionError:
-    # If we can't write to the file, just log to console
-    pass
+def configure_logging():
+    handlers = [logging.StreamHandler(sys.stdout)]
+    log_dir = Path.cwd() / "logs"
+    try:
+        log_dir.mkdir(exist_ok=True)
+        handlers.append(logging.FileHandler(log_dir / "traffic_generator.log"))
+    except OSError:
+        pass
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=handlers,
+    )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=handlers
-)
+
+configure_logging()
 logger = logging.getLogger(__name__)
 
-# List of popular websites to visit
-WEBSITES = [
+DEFAULT_WEBSITES = (
     "https://www.google.com",
     "https://www.github.com",
     "https://www.stackoverflow.com",
@@ -48,215 +47,345 @@ WEBSITES = [
     "https://www.youtube.com",
     "https://www.amazon.com",
     "https://www.netflix.com",
-    "https://www.twitter.com",
     "https://www.linkedin.com",
-    "https://www.medium.com",
     "https://www.dev.to",
-    "https://www.hackernews.com",
-    "https://www.producthunt.com",
+    "https://news.ycombinator.com",
     "https://www.techcrunch.com",
-    "https://www.ars-technica.com",
     "https://www.theverge.com",
     "https://www.wired.com",
-    "https://www.cnn.com",
     "https://www.bbc.com",
-    "https://www.nytimes.com",
-    "https://www.washingtonpost.com",
-    "https://www.economist.com",
     "https://www.nature.com",
-    "https://www.science.org",
-    "https://www.arxiv.org",
-    "https://www.researchgate.net",
-    "https://www.academia.edu",
-    "https://www.coursera.org",
-    "https://www.edx.org",
-    "https://www.udemy.com",
-    "https://www.freecodecamp.org",
-    "https://www.codecademy.com",
-    "https://www.theodinproject.com",
-    "https://www.frontendmentor.io",
-    "https://www.css-tricks.com",
-    "https://www.smashingmagazine.com",
-    "https://www.alistapart.com",
-    "https://www.web.dev",
-    "https://www.mozilla.org",
     "https://www.python.org",
-    "https://www.nodejs.org",
-    "https://www.reactjs.org",
-    "https://www.vuejs.org",
-    "https://www.angular.io",
     "https://www.docker.com",
     "https://www.kubernetes.io",
     "https://www.terraform.io",
-    "https://www.ansible.com"
-]
+)
+MAX_SITES = 100
+MAX_URL_LENGTH = 2048
+MAX_REQUEST_BODY = 64 * 1024
+
+
+def validate_site_url(value):
+    if not isinstance(value, str):
+        raise ValueError("Each site must be a URL string")
+    value = value.strip()
+    if not value or len(value) > MAX_URL_LENGTH:
+        raise ValueError("Site URLs must be between 1 and 2048 characters")
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("Only HTTPS URLs with a hostname are allowed")
+    if parsed.username or parsed.password:
+        raise ValueError("Credentials are not allowed in site URLs")
+    if parsed.port not in (None, 443):
+        raise ValueError("Only the standard HTTPS port is allowed")
+    if parsed.fragment:
+        raise ValueError("URL fragments are not allowed")
+    hostname = parsed.hostname.lower()
+    if hostname == "localhost" or hostname.endswith(
+        (".localhost", ".local", ".internal")
+    ):
+        raise ValueError("Private hostnames are not allowed")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        if not address.is_global:
+            raise ValueError("Private IP addresses are not allowed")
+    return value
+
+
+def destination_is_public(url):
+    """Resolve a target immediately before use and reject non-public addresses."""
+    hostname = urlparse(url).hostname
+    if not hostname:
+        return False
+    try:
+        addresses = socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False
+    if not addresses:
+        return False
+    try:
+        return all(ipaddress.ip_address(item[4][0]).is_global for item in addresses)
+    except ValueError:
+        return False
+
+
+class SiteStore:
+    def __init__(self, sites=DEFAULT_WEBSITES):
+        self._lock = threading.RLock()
+        self._sites = list(sites)
+
+    def snapshot(self):
+        with self._lock:
+            return list(self._sites)
+
+    def replace(self, sites):
+        if not isinstance(sites, list):
+            raise ValueError("sites must be an array")
+        if not sites or len(sites) > MAX_SITES:
+            raise ValueError(f"Provide between 1 and {MAX_SITES} sites")
+        validated = []
+        seen = set()
+        for site in sites:
+            normalized = validate_site_url(site)
+            if normalized not in seen:
+                validated.append(normalized)
+                seen.add(normalized)
+        if not validated:
+            raise ValueError("Provide at least one unique site")
+        with self._lock:
+            self._sites = validated
+        return self.snapshot()
 
 
 class TrafficGenerator:
-    def __init__(self, max_workers=5, delay_range=(1, 5), timeout=10):
+    def __init__(self, site_store, max_workers=5, delay_range=(1, 5), timeout=10):
+        self.site_store = site_store
         self.max_workers = max_workers
         self.delay_range = delay_range
         self.timeout = timeout
+        self.started_at = time.time()
+        self._stats_lock = threading.Lock()
+        self._stats = {
+            "total_requests": 0,
+            "successful_requests": 0,
+            "failed_requests": 0,
+            "total_duration": 0.0,
+        }
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "Chrome/126.0 Safari/537.36 TrafficGen/2.0"
+                )
+            }
+        )
+
+    def status(self):
+        with self._stats_lock:
+            stats = dict(self._stats)
+        successful = stats["successful_requests"]
+        stats["average_duration"] = (
+            round(stats["total_duration"] / successful, 3) if successful else 0
+        )
+        stats["uptime_seconds"] = int(time.time() - self.started_at)
+        stats["site_count"] = len(self.site_store.snapshot())
+        stats.pop("total_duration")
+        return stats
 
     def visit_website(self, url):
-        """Visit a single website and log the result."""
+        if not destination_is_public(url):
+            logger.error("Blocked non-public or unresolved destination: %s", url)
+            return {"url": url, "status_code": None, "duration": None, "success": False}
         try:
-            logger.info(f"Visiting: {url}")
-            start_time = time.time()
-
+            logger.info("Visiting: %s", url)
+            started_at = time.time()
             response = self.session.get(
-                url, timeout=self.timeout, allow_redirects=True)
-            end_time = time.time()
-
-            duration = end_time - start_time
-            status_code = response.status_code
-
-            if status_code == 200:
-                logger.info(
-                    f"✅ Success: {url} (Status: {status_code}, Duration: {duration:.2f}s)")
-            else:
-                logger.warning(
-                    f"⚠️  Warning: {url} (Status: {status_code}, Duration: {duration:.2f}s)")
-
+                url,
+                timeout=self.timeout,
+                allow_redirects=False,
+            )
+            duration = time.time() - started_at
+            successful = 200 <= response.status_code < 400
+            log = logger.info if successful else logger.warning
+            log(
+                "Result: %s (status=%s, duration=%.2fs)",
+                url,
+                response.status_code,
+                duration,
+            )
             return {
-                'url': url,
-                'status_code': status_code,
-                'duration': duration,
-                'success': status_code == 200
+                "url": url,
+                "status_code": response.status_code,
+                "duration": duration,
+                "success": successful,
             }
-
         except requests.exceptions.Timeout:
-            logger.error(f"❌ Timeout: {url}")
-            return {'url': url, 'status_code': None, 'duration': None, 'success': False}
+            logger.error("Timeout: %s", url)
         except requests.exceptions.ConnectionError:
-            logger.error(f"❌ Connection Error: {url}")
-            return {'url': url, 'status_code': None, 'duration': None, 'success': False}
-        except Exception as e:
-            logger.error(f"❌ Error visiting {url}: {str(e)}")
-            return {'url': url, 'status_code': None, 'duration': None, 'success': False}
+            logger.error("Connection error: %s", url)
+        except requests.RequestException as error:
+            logger.error("Request error for %s: %s", url, error)
+        return {"url": url, "status_code": None, "duration": None, "success": False}
 
     def generate_traffic(self, num_requests=None, continuous=False):
-        """Generate traffic by visiting random websites."""
-        stats = {
-            'total_requests': 0,
-            'successful_requests': 0,
-            'failed_requests': 0,
-            'total_duration': 0
-        }
-
         if continuous:
-            logger.info("Starting continuous traffic generation...")
+            logger.info("Starting continuous traffic generation")
             while True:
-                self._process_batch(1, stats)
+                self._process_batch(1)
                 delay = random.uniform(*self.delay_range)
-                logger.info(
-                    f"Waiting {delay:.2f} seconds before next request...")
+                logger.info("Waiting %.2f seconds before next request", delay)
                 time.sleep(delay)
         else:
-            if num_requests is None:
-                num_requests = len(WEBSITES)
+            sites = self.site_store.snapshot()
+            request_count = num_requests if num_requests is not None else len(sites)
+            logger.info("Starting traffic generation for %s requests", request_count)
+            self._process_batch(request_count)
+            self._print_stats()
 
-            logger.info(
-                f"Starting traffic generation for {num_requests} requests...")
-            self._process_batch(num_requests, stats)
-
-        self._print_stats(stats)
-
-    def _process_batch(self, num_requests, stats):
-        """Process a batch of requests."""
+    def _process_batch(self, num_requests):
+        sites = self.site_store.snapshot()
+        selected_urls = random.sample(sites, min(num_requests, len(sites)))
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Select random websites
-            selected_urls = random.sample(
-                WEBSITES, min(num_requests, len(WEBSITES)))
-
-            # Submit requests
-            future_to_url = {executor.submit(
-                self.visit_website, url): url for url in selected_urls}
-
-            # Collect results
-            for future in future_to_url:
+            futures = [
+                executor.submit(self.visit_website, url) for url in selected_urls
+            ]
+            for future in futures:
                 result = future.result()
-                stats['total_requests'] += 1
+                with self._stats_lock:
+                    self._stats["total_requests"] += 1
+                    if result["success"]:
+                        self._stats["successful_requests"] += 1
+                        if result["duration"]:
+                            self._stats["total_duration"] += result["duration"]
+                    else:
+                        self._stats["failed_requests"] += 1
 
-                if result['success']:
-                    stats['successful_requests'] += 1
-                    if result['duration']:
-                        stats['total_duration'] += result['duration']
-                else:
-                    stats['failed_requests'] += 1
+    def _print_stats(self):
+        stats = self.status()
+        logger.info(
+            "Traffic stats: total=%s successful=%s failed=%s average=%.2fs",
+            stats["total_requests"],
+            stats["successful_requests"],
+            stats["failed_requests"],
+            stats["average_duration"],
+        )
 
-    def _print_stats(self, stats):
-        """Print traffic generation statistics."""
-        logger.info("=" * 50)
-        logger.info("TRAFFIC GENERATION STATISTICS")
-        logger.info("=" * 50)
-        logger.info(f"Total Requests: {stats['total_requests']}")
-        logger.info(f"Successful: {stats['successful_requests']}")
-        logger.info(f"Failed: {stats['failed_requests']}")
 
-        if stats['successful_requests'] > 0:
-            avg_duration = stats['total_duration'] / \
-                stats['successful_requests']
-            logger.info(f"Average Response Time: {avg_duration:.2f}s")
+def make_request_handler(site_store, generator, frontend_path=None):
+    frontend_path = frontend_path or Path(__file__).with_name("index.html")
 
-        success_rate = (stats['successful_requests'] /
-                        stats['total_requests']) * 100
-        logger.info(f"Success Rate: {success_rate:.1f}%")
-        logger.info("=" * 50)
+    class TrafficRequestHandler(BaseHTTPRequestHandler):
+        server_version = "TrafficGen/2.0"
+
+        def do_GET(self):
+            path = self.path.split("?", 1)[0]
+            if path in ("/", "/index.html"):
+                self._send_frontend()
+            elif path == "/healthz":
+                self._send_json({"status": "ok"})
+            elif path == "/api/sites":
+                self._send_json({"sites": site_store.snapshot()})
+            elif path == "/api/status":
+                self._send_json(generator.status())
+            else:
+                self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+
+        def do_PUT(self):
+            if self.path.split("?", 1)[0] != "/api/sites":
+                self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+                if content_length <= 0 or content_length > MAX_REQUEST_BODY:
+                    raise ValueError("Request body is empty or too large")
+                payload = json.loads(self.rfile.read(content_length))
+                if not isinstance(payload, dict):
+                    raise ValueError("Request body must be an object")
+                sites = site_store.replace(payload.get("sites"))
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+                self._send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            logger.info("Activated %s traffic targets", len(sites))
+            self._send_json({"sites": sites})
+
+        def _send_frontend(self):
+            try:
+                content = frontend_path.read_bytes()
+            except OSError:
+                self._send_json(
+                    {"error": "Frontend asset is unavailable"},
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+            self.send_response(HTTPStatus.OK)
+            self._security_headers("text/html; charset=utf-8", len(content))
+            self.end_headers()
+            self.wfile.write(content)
+
+        def _send_json(self, payload, status=HTTPStatus.OK):
+            content = json.dumps(payload, separators=(",", ":")).encode()
+            self.send_response(status)
+            self._security_headers("application/json", len(content))
+            self.end_headers()
+            self.wfile.write(content)
+
+        def _security_headers(self, content_type, content_length):
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(content_length))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "script-src 'self' 'unsafe-inline'; connect-src 'self'",
+            )
+
+        def log_message(self, message, *args):
+            logger.info("HTTP %s - %s", self.address_string(), message % args)
+
+    return TrafficRequestHandler
+
+
+def create_web_server(
+    site_store, generator, host="0.0.0.0", port=8080, frontend_path=None
+):
+    return ThreadingHTTPServer(
+        (host, port),
+        make_request_handler(site_store, generator, frontend_path),
+    )
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Simple Web Traffic Generator")
+    parser.add_argument("--requests", "-r", type=int, default=None)
+    parser.add_argument("--continuous", "-c", action="store_true")
+    parser.add_argument("--workers", "-w", type=int, default=5)
+    parser.add_argument("--delay-min", type=float, default=1.0)
+    parser.add_argument("--delay-max", type=float, default=5.0)
+    parser.add_argument("--timeout", "-t", type=int, default=10)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8080")))
+    return parser.parse_args()
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Simple Web Traffic Generator')
-    parser.add_argument('--requests', '-r', type=int, default=None,
-                        help='Number of requests to make (default: all websites)')
-    parser.add_argument('--continuous', '-c', action='store_true',
-                        help='Run continuously until stopped')
-    parser.add_argument('--workers', '-w', type=int, default=5,
-                        help='Number of concurrent workers (default: 5)')
-    parser.add_argument('--delay-min', type=float, default=1.0,
-                        help='Minimum delay between requests in seconds (default: 1.0)')
-    parser.add_argument('--delay-max', type=float, default=5.0,
-                        help='Maximum delay between requests in seconds (default: 5.0)')
-    parser.add_argument('--timeout', '-t', type=int, default=10,
-                        help='Request timeout in seconds (default: 10)')
-
-    args = parser.parse_args()
-
-    # Validate arguments
+    args = parse_args()
     if args.requests is not None and args.requests <= 0:
-        logger.error("Number of requests must be positive")
-        sys.exit(1)
-
+        raise SystemExit("Number of requests must be positive")
     if args.delay_min < 0 or args.delay_max < 0:
-        logger.error("Delay values must be non-negative")
-        sys.exit(1)
-
+        raise SystemExit("Delay values must be non-negative")
     if args.delay_min > args.delay_max:
-        logger.error("Minimum delay cannot be greater than maximum delay")
-        sys.exit(1)
+        raise SystemExit("Minimum delay cannot be greater than maximum delay")
+    if not 1 <= args.port <= 65535:
+        raise SystemExit("Port must be between 1 and 65535")
 
-    # Create and run traffic generator
+    site_store = SiteStore()
     generator = TrafficGenerator(
+        site_store,
         max_workers=args.workers,
         delay_range=(args.delay_min, args.delay_max),
-        timeout=args.timeout
+        timeout=args.timeout,
     )
+    server = create_web_server(site_store, generator, port=args.port)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    logger.info("Traffic control UI listening on port %s", args.port)
 
     try:
         generator.generate_traffic(
             num_requests=args.requests,
-            continuous=args.continuous
+            continuous=args.continuous,
         )
     except KeyboardInterrupt:
         logger.info("Traffic generation stopped by user")
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        sys.exit(1)
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 if __name__ == "__main__":
